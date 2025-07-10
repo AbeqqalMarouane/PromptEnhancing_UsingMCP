@@ -2,22 +2,25 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { dbConfig, mysql } from '@/lib/db'; // <-- Step 1: Import shared config
+import { dbConfig, mysql } from '@/lib/db';
 
-// Validation schema for creating a session
+// The validation schema is correct as it validates the standard ISO format from the client.
 const sessionSchema = z.object({
   title: z.string().min(1, { message: 'Session title is required' }),
   description: z.string().optional().or(z.literal('')),
-  // Expect a full ISO date-time string from the client (e.g., "2025-07-15T09:00:00")
   start_time: z.string().datetime({ message: 'Invalid start time format. Expected ISO 8601 format.' }),
   end_time: z.string().datetime({ message: 'Invalid end time format. Expected ISO 8601 format.' }),
   room: z.string().optional().or(z.literal('')),
   event_id: z.number().int().positive({ message: 'A valid event ID is required' }),
-  // speaker_id can be optional (e.g., for a lunch break)
   speaker_id: z.number().int().positive().optional().nullable(),
 });
 
-// --- REMOVED THE LOCAL dbConfig OBJECT FROM HERE ---
+// ADDED: A helper function to format the date for MySQL
+const toMySQLDatetime = (isoString: string) => {
+  // Converts "2025-07-16T10:00:00.000Z" into "2025-07-16 10:00:00"
+  return isoString.slice(0, 19).replace('T', ' ');
+};
+
 
 export async function GET() {
   console.log('GET /api/sessions called');
@@ -26,19 +29,11 @@ export async function GET() {
   try {
     connection = await mysql.createConnection(dbConfig);
     
-    // Corrected SQL to select correct column names and join speaker info
+    // This GET request is correct and does not need changes.
     const [rows] = await connection.execute(`
       SELECT 
-        s.id,
-        s.title,
-        s.description,
-        s.start_time,
-        s.end_time,
-        s.room,
-        s.event_id,
-        s.speaker_id,
-        e.title AS event_title,
-        sp.name AS speaker_name
+        s.id, s.title, s.description, s.start_time, s.end_time, s.room,
+        s.event_id, s.speaker_id, e.title AS event_title, sp.name AS speaker_name
       FROM sessions s
       LEFT JOIN events e ON s.event_id = e.id
       LEFT JOIN speakers sp ON s.speaker_id = sp.id
@@ -66,21 +61,21 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    
-    // Validate the incoming data
     const validatedData = sessionSchema.parse(body);
     
     connection = await mysql.createConnection(dbConfig);
     
     const sql = 'INSERT INTO sessions (title, description, start_time, end_time, room, event_id, speaker_id) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    
+    // CORRECTED: The start_time and end_time are now formatted before being sent to the database.
     const values = [
       validatedData.title,
       validatedData.description || null,
-      validatedData.start_time, // This is now a full DATETIME string
-      validatedData.end_time,   // This is now a full DATETIME string
+      toMySQLDatetime(validatedData.start_time), // Apply conversion
+      toMySQLDatetime(validatedData.end_time),   // Apply conversion
       validatedData.room || null,
       validatedData.event_id,
-      validatedData.speaker_id || null, // Handle optional speaker
+      validatedData.speaker_id || null,
     ];
 
     const [result] = await connection.execute(sql, values);
@@ -91,19 +86,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ 
       message: 'Session created successfully',
       sessionId: insertId 
-    }, { status: 201 }); // 201 Created
+    }, { status: 201 });
     
   } catch (error) {
-    // Handle validation errors
     if (error instanceof z.ZodError) {
       console.error('Validation error:', error.errors);
       return NextResponse.json(
         { message: 'Invalid input data', details: error.flatten().fieldErrors },
-        { status: 400 } // 400 Bad Request
+        { status: 400 }
       );
     }
     
-    // Handle generic server errors
     console.error('Error creating session:', error);
     return NextResponse.json(
       { message: 'An error occurred while creating the session.' },

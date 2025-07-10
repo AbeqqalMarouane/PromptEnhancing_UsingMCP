@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { dbConfig, mysql } from '@/lib/db'; // <-- Step 1: Import shared config
+import { dbConfig, mysql } from '@/lib/db';
 
 // Validation schema for creating a speaker
 const speakerSchema = z.object({
@@ -10,20 +10,19 @@ const speakerSchema = z.object({
   topic: z.string().min(1, { message: 'Topic is required' }),
   bio: z.string().optional().or(z.literal('')),
   company: z.string().optional().or(z.literal('')),
-  event_id: z.number().int().positive({ message: 'A valid event ID is required' }),
+  // event_id is optional to allow speakers to be created without being assigned to an event yet.
+  event_id: z.number().int().positive().optional(),
 });
-
-// --- REMOVED THE LOCAL dbConfig OBJECT FROM HERE ---
 
 export async function GET() {
   console.log('GET /api/speakers called');
   let connection;
 
   try {
-    // Use the imported, centralized database configuration
     connection = await mysql.createConnection(dbConfig);
     
-    // Corrected SQL to match your database schema (events has 'title')
+    // CORRECTED: The SQL query now uses `e.title` which exists in your `events` table,
+    // and removes the non-existent `e.type` column.
     const [rows] = await connection.execute(`
       SELECT 
         s.id,
@@ -32,7 +31,7 @@ export async function GET() {
         s.bio,
         s.company,
         s.event_id,
-        e.title AS event_title
+        e.title AS event_name
       FROM speakers s
       LEFT JOIN events e ON s.event_id = e.id
       ORDER BY s.name ASC
@@ -47,7 +46,6 @@ export async function GET() {
       { status: 500 }
     );
   } finally {
-    // Ensure the connection is always closed
     if (connection) {
       await connection.end();
     }
@@ -60,8 +58,6 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    
-    // Validate the incoming data
     const validatedData = speakerSchema.parse(body);
     
     connection = await mysql.createConnection(dbConfig);
@@ -72,30 +68,27 @@ export async function POST(request: NextRequest) {
       validatedData.topic,
       validatedData.bio || null,
       validatedData.company || null,
-      validatedData.event_id,
+      validatedData.event_id || null, 
     ];
 
     const [result] = await connection.execute(sql, values);
     
     const insertId = (result as any).insertId;
-    console.log(`Speaker created successfully with ID: ${insertId}`);
     
     return NextResponse.json({ 
       message: 'Speaker created successfully',
       speakerId: insertId 
-    }, { status: 201 }); // 201 Created
+    }, { status: 201 });
     
   } catch (error) {
-    // Handle validation errors
     if (error instanceof z.ZodError) {
       console.error('Validation error:', error.errors);
       return NextResponse.json(
         { message: 'Invalid input data', details: error.flatten().fieldErrors },
-        { status: 400 } // 400 Bad Request
+        { status: 400 }
       );
     }
     
-    // Handle generic server errors
     console.error('Error creating speaker:', error);
     return NextResponse.json(
       { message: 'An error occurred while creating the speaker.' },

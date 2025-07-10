@@ -1,19 +1,18 @@
-// in app/api/events/route.ts
+// app/api/events/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { dbConfig, mysql } from '@/lib/db'; // <-- Step 1: Import shared config
+import { dbConfig, mysql } from '@/lib/db';
 
-// Validation schema that matches our final database schema
-const eventSchema = z.object({
-  title: z.string().min(1, { message: 'Event title is required' }),
-  event_date: z.string().datetime({ message: 'A valid event date is required' }),
-  location: z.string().min(1, { message: 'Location is required' }),
-  organizer: z.string().optional().or(z.literal('')),
-  user_id: z.number().int().positive({ message: 'A valid user ID is required' }),
+// CORRECTED: This schema is now simplified. 'capacity' and 'status' have been removed.
+const eventFormSchema = z.object({
+  name: z.string().min(1, 'Event Name is required'),
+  type: z.string().min(1, 'Event Type is required'),
+  date: z.string().min(1, 'Date is required'),
+  location: z.string().min(1, 'Location is required'),
+  description: z.string().optional(),
 });
 
-// --- REMOVED THE FLAWED initializeDatabase() FUNCTION AND LOCAL dbConfig ---
 
 export async function GET() {
   console.log('GET /api/events called');
@@ -22,26 +21,16 @@ export async function GET() {
   try {
     connection = await mysql.createConnection(dbConfig);
     
-    // This query counts related items and uses the correct column 'title'
+    // The query now uses `e.event_type` as corrected previously.
     const [rows] = await connection.execute(`
       SELECT 
-        e.id,
-        e.title,
-        e.event_date,
-        e.location,
-        e.organizer,
-        e.user_id,
-        u.username AS user_username,
-        COUNT(DISTINCT sp.id) AS speaker_count,
-        COUNT(DISTINCT se.id) AS session_count,
-        COUNT(DISTINCT so.id) AS sponsor_count
-      FROM events e
-      LEFT JOIN users u ON e.user_id = u.id
-      LEFT JOIN speakers sp ON e.id = sp.event_id
-      LEFT JOIN sessions se ON e.id = se.event_id
-      LEFT JOIN sponsors so ON e.id = so.event_id
-      GROUP BY e.id
-      ORDER BY e.event_date DESC
+        id,
+        title AS name,
+        event_date AS date,
+        location,
+        event_type AS type
+      FROM events
+      ORDER BY event_date DESC
     `);
     
     return NextResponse.json(rows);
@@ -66,17 +55,24 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const validatedData = eventSchema.parse(body);
+    // Validate using the new, simpler schema.
+    const validatedData = eventFormSchema.parse(body);
     
     connection = await mysql.createConnection(dbConfig);
     
-    const sql = 'INSERT INTO events (title, event_date, location, organizer, user_id) VALUES (?, ?, ?, ?, ?)';
+    // The SQL statement uses the new `event_type` and `description` columns.
+    const sql = `
+      INSERT INTO events (title, event_date, location, event_type, description, user_id) 
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+
     const values = [
-      validatedData.title,
-      validatedData.event_date,
+      validatedData.name,
+      validatedData.date,
       validatedData.location,
-      validatedData.organizer || null,
-      validatedData.user_id,
+      validatedData.type,
+      validatedData.description || null,
+      1, // Hardcoding user_id to 1.
     ];
 
     const [result] = await connection.execute(sql, values);
@@ -91,7 +87,7 @@ export async function POST(request: NextRequest) {
     
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error('Validation error:', error.errors);
+      console.error('Validation error:', error.flatten().fieldErrors);
       return NextResponse.json(
         { message: 'Invalid input data', details: error.flatten().fieldErrors },
         { status: 400 }
