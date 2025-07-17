@@ -2,15 +2,17 @@
   "name": "src",
   "version": "0.1.0",
   "private": true,
+  
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "tsc && chmod 755 build/index.js",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^5.0.1",
+    "@modelcontextprotocol/sdk": "^1.15.1",
     "@radix-ui/react-accordion": "^1.2.3",
     "@radix-ui/react-alert-dialog": "^1.1.6",
     "@radix-ui/react-aspect-ratio": "^1.1.2",
@@ -42,12 +44,13 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
+    "dotenv": "^17.2.0",
     "embla-carousel-react": "^8.5.2",
     "framer-motion": "^12.6.3",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.487.0",
     "mysql2": "^3.14.1",
-    "next": "15.2.4",
+    "next": "^15.2.4",
     "next-themes": "^0.4.6",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
@@ -66,8 +69,8 @@
     "@eslint/eslintrc": "^3",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
-    "@types/node": "^20",
-    "@types/react": "^19",
+    "@types/node": "^20.19.8",
+    "@types/react": "^19.1.8",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.21",
     "eslint": "^9",
@@ -76,7 +79,8 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
-    "typescript": "^5",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
     "vitest": "^3.1.1"
   }
 }
