@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-// --- MCP Client Singleton (This part is correct and remains the same) ---
+// --- MCP Client Singleton 
 let mcpClientInstance: McpClient | null = null;
 let mcpInitializationPromise: Promise<McpClient> | null = null;
 
