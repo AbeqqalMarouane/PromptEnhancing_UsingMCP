@@ -2,7 +2,6 @@
   "name": "src",
   "version": "0.1.0",
   "private": true,
-  
   "scripts": {
     "dev": "next dev",
     "build": "tsc && chmod 755 build/index.js",
@@ -10,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@abeqqal_marouane/mysql-mcp-server": "^1.0.1",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^5.0.1",
     "@modelcontextprotocol/sdk": "^1.15.1",

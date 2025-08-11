@@ -17,13 +17,15 @@ async function getMcpClient(): Promise<McpClient> {
   
   mcpInitializationPromise = new Promise(async (resolve, reject) => {
     try {
-      const serverPath = process.env.MCP_SERVER_PROJECT_PATH;
-      if (!serverPath) {
-        throw new Error("MCP_SERVER_PROJECT_PATH is not set in your .env.local file.");
-      }
-      console.log("Initializing MCP Client and starting server process...");
+      console.log("Initializing MCP Client and starting server package...");
       const client = new McpClient({ name: "EventScribeAI-Client", version: "1.0.0" });
-      const transport = new StdioClientTransport({ command: "npm", args: ["start"], cwd: serverPath });
+
+      // This is now clean and professional. It uses the installed command directly.
+      const transport = new StdioClientTransport({
+        command: "mysql-mcp-server",
+        args: [] 
+      });
+
       await client.connect(transport);
       console.log("✅ MCP Server connected successfully.");
       mcpClientInstance = client;

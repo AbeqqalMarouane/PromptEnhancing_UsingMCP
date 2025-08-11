@@ -20,6 +20,8 @@ import {
 import { toast } from 'sonner';
 import Link from 'next/link';
 
+
+
 interface HistoryItem {
   id: string;
   userPrompt: string;
@@ -34,6 +36,11 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [error, setError] = useState('');
+  const [hydrated, setHydrated] = useState(false);
+
+          useEffect(() => {
+            setHydrated(true);
+          }, []);
 
   console.log('Component mounted, loading history from localStorage');
 
@@ -242,29 +249,34 @@ export default function Home() {
                 <CardTitle className="text-xl">Generate Event Description</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Textarea
-                  placeholder="Describe the event you want to generate content for... (e.g., 'Create a description for our annual tech conference focusing on AI and machine learning')"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  className="min-h-[120px] resize-none"
-                />
-                <Button 
-                  onClick={generateDescription}
-                  disabled={isGenerating || !prompt.trim()}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {isGenerating ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Generating...
-                    </>
-                  ) : (
-                    <>
-                      <Wand2 className="w-4 h-4 mr-2" />
-                      Generate Description
-                    </>
-                  )}
-                </Button>
+                {hydrated && (
+                  <>
+                    <Textarea
+                      placeholder="Describe the event you want to generate content for..."
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      className="min-h-[120px] resize-none"
+                    />
+                    <Button 
+                      onClick={generateDescription}
+                      disabled={isGenerating || !prompt.trim()}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {isGenerating ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 className="w-4 h-4 mr-2" />
+                          Generate Description
+                        </>
+                      )}
+                    </Button>
+                  </>
+                )}
+
               </CardContent>
             </Card>
 
