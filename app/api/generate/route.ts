@@ -1,44 +1,52 @@
 // in app/api/generate/route.ts
-//this code works
 
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 import { z } from 'zod';
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-// --- MCP Client Singleton 
-let mcpClientInstance: McpClient | null = null;
-let mcpInitializationPromise: Promise<McpClient> | null = null;
-
+// --- MCP Client (STATELESS Production Version) ---
+// This function creates a new, fresh client for every API request. This is the
+// most reliable pattern for serverless environments and for local Next.js
+// development with Fast Refresh, as it prevents session conflicts.
 async function getMcpClient(): Promise<McpClient> {
-  if (mcpClientInstance) return mcpClientInstance;
-  if (mcpInitializationPromise) return mcpInitializationPromise;
-  
-  mcpInitializationPromise = new Promise(async (resolve, reject) => {
-    try {
-      console.log("Initializing MCP Client and starting server package...");
-      const client = new McpClient({ name: "EventScribeAI-Client", version: "1.0.0" });
+  const serverUrl = process.env.NEXT_PUBLIC_MCP_SERVER_URL;
+  if (!serverUrl) {
+    throw new Error("NEXT_PUBLIC_MCP_SERVER_URL is not set in your .env.local file.");
+  }
 
-      // This is now clean and professional. It uses the installed command directly.
-      const transport = new StdioClientTransport({
-        command: "mysql-mcp-server",
-        args: [] 
-      });
-
-      await client.connect(transport);
-      console.log("✅ MCP Server connected successfully.");
-      mcpClientInstance = client;
-      resolve(client);
-    } catch (error) {
-      mcpInitializationPromise = null;
-      reject(error);
-    }
+  const client = new McpClient({ name: "EventScribeAI-Client", version: "1.0.0" });
+  const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
+    fetch: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(30000) }),
   });
-  return mcpInitializationPromise;
+  await client.connect(transport);
+  
+  console.log("✅ New remote MCP Server connection established successfully.");
+  
+  return client;
 }
 
-// --- API Route Logic (NEWEST "Autonomous Agent" Version) ---
+// --- RECOMMENDED: Retry Helper Function ---
+async function generateContentWithRetry(model: GenerativeModel, prompt: string, retries = 3): Promise<any> {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const result = await model.generateContent(prompt);
+            return result;
+        } catch (error: any) {
+            if (error.status === 503 && i < retries - 1) {
+                const delay = Math.pow(2, i + 1) * 1000;
+                console.warn(`Attempt ${i + 1} failed with 503. Retrying in ${delay / 1000} seconds...`);
+                await new Promise(res => setTimeout(res, delay));
+            } else {
+                throw error;
+            }
+        }
+    }
+    throw new Error("Failed to generate content after multiple retries.");
+}
+
+// --- API Route Logic ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const generateSchema = z.object({
   prompt: z.string().min(1, 'Prompt is required'),
@@ -48,12 +56,12 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { prompt: userPrompt } = generateSchema.parse(body);
 
+  let mcpClient: McpClient | null = null;
   try {
-    const mcpClient = await getMcpClient();
+    // A new client is created for every request.
+    mcpClient = await getMcpClient();
 
     // --- AGENTIC WORKFLOW START ---
-
-    // FIX #1: Fetch the FULL database schema for much better context.
     console.log("AGENT: Fetching full database schema via MCP resource...");
     const schemaResult = await mcpClient.readResource({ uri: "mysql://schemas" });
     const schemaContent = schemaResult.contents[0];
@@ -63,35 +71,30 @@ export async function POST(request: NextRequest) {
     const dbSchema = schemaContent.text;
     console.log("AGENT: ✅ Full schema fetched.");
 
-    // Step 2: Ask the LLM to generate the SQL queries it needs, with better instructions.
     console.log("AGENT: Asking LLM to generate necessary SQL queries...");
     const queryGenerationModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     
-    // FIX #2: A more robust prompt for the AI to ensure it returns valid JSON.
     const promptForSql = `
-      You are an expert SQL data analyst AI. Your task is to generate the necessary SQL queries to answer a user's request based on the provided database schema.
+      You are an automated SQL generation bot. Your only purpose is to generate a JSON array of SQL query strings. Do not ask for more information. Do not add any conversational text.
 
-      DATABASE SCHEMA:
+      Input Schema:
       \`\`\`sql
       ${dbSchema}
       \`\`\`
 
-      USER REQUEST: "${userPrompt}"
+      Input User Request: "${userPrompt}"
 
-      Based on the user's request and the schema, generate a JSON array of SQL SELECT query strings to fetch all relevant details about the event mentioned. The main event can be found by its title. Use subqueries with the event ID to fetch related data from other tables like speakers and sessions.
+      Task: Based on the schema and the user request, generate a JSON array of all SQL SELECT queries needed to gather the relevant information from all the the database tables that have reletion with this relevante information asked by the user.
 
-      IMPORTANT: Your response MUST be a valid JSON array of strings and nothing else. Do not include any explanatory text, markdown formatting, or anything outside of the JSON array.
-
-      Example of a perfect response for a request about "DevOps Mastring":
-      ["SELECT * FROM event_table WHERE title LIKE '%DevOps Mastring%'", "SELECT * FROM speakers_table WHERE event_id IN (SELECT id FROM events_table WHERE title LIKE '%DevOps Mastring%')"]
-    `;
+      Output:
+      `;
     
-    const sqlResult = await queryGenerationModel.generateContent(promptForSql);
+    const sqlResult = await generateContentWithRetry(queryGenerationModel, promptForSql);
     const sqlResponseText = sqlResult.response.text().trim();
     
     let queriesToRun: string[] = [];
     try {
-        const cleanedResponse = sqlResponseText.replace(/```json|```/g, '').trim();
+        const cleanedResponse = sqlResponseText.replace(/^```json\s*|```$/g, '').trim();
         queriesToRun = JSON.parse(cleanedResponse);
     } catch (e) {
         console.error("AGENT ERROR: LLM did not return valid JSON for SQL queries. Raw response:", sqlResponseText);
@@ -99,7 +102,6 @@ export async function POST(request: NextRequest) {
     }
     console.log(`AGENT: ✅ LLM generated ${queriesToRun.length} queries:`, queriesToRun);
 
-    // Step 3: Execute the LLM-generated queries using the MCP tool.
     console.log("AGENT: Executing generated queries via MCP...");
     const fetchedContext: any = {};
     for (const sql of queriesToRun) {
@@ -116,10 +118,9 @@ export async function POST(request: NextRequest) {
     }
     console.log("AGENT: ✅ All data fetched.");
 
-    // Step 4: Generate the final description using the dynamically fetched context.
     const finalPrompt = constructEnhancedPrompt(userPrompt, fetchedContext);
     const finalGenerationModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    const finalResult = await finalGenerationModel.generateContent(finalPrompt);
+    const finalResult = await generateContentWithRetry(finalGenerationModel, finalPrompt);
     const description = finalResult.response.text();
 
     console.log('AI generation completed with DYNAMICALLY fetched MCP context.');
@@ -129,11 +130,16 @@ export async function POST(request: NextRequest) {
     console.error('An error occurred in the generate API route:', error);
     console.warn("Agentic workflow failed. Falling back to AI-only generation.");
     return await generateWithAIOnly(userPrompt);
+  } finally {
+    // Crucial: We must close the connection after every request.
+    if (mcpClient) {
+      await mcpClient.close();
+      console.log("MCP client connection closed.");
+    }
   }
 }
 
-// --- Helper Functions (No changes needed below this line) ---
-
+// --- Helper Functions (No changes needed) ---
 function constructEnhancedPrompt(userPrompt: string, context: any) {
   console.log('Constructing final prompt with dynamic context');
   let contextSummary = "The following data was retrieved from the database to answer your request:\n";
@@ -165,7 +171,8 @@ async function generateWithAIOnly(prompt: string) {
       - Have a clear call-to-action
       - Be suitable for marketing materials
       Please provide only the event description without any additional formatting or explanations.`;
-      const result = await model.generateContent(basicPrompt);
+      
+      const result = await generateContentWithRetry(model, basicPrompt);
       const response = await result.response;
       const description = response.text();
       return NextResponse.json({
